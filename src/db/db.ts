@@ -1,4 +1,8 @@
+import dotenv from 'dotenv';
 import { createPool, Pool } from 'mysql2/promise';
+
+dotenv.config({ path: '.env.local' });
+dotenv.config();
 
 // Define DB Types
 export interface Role {
@@ -747,20 +751,27 @@ export async function getDbPool(): Promise<Pool | null> {
   }
 
   try {
-    mysqlPool = createPool({
+    const pool = createPool({
       host: DB_HOST,
       user: DB_USER,
-      password: DB_PASSWORD,
-      database: DB_NAME,
+      password: DB_PASSWORD || '',
+      database: DB_NAME || 'erp_maquila_db',
       port: DB_PORT ? parseInt(DB_PORT, 10) : 3306,
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
+      connectTimeout: 5000,
     });
+
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+
+    mysqlPool = pool;
     console.log('Successfully connected to MySQL database!');
     return mysqlPool;
   } catch (err) {
-    console.error('Failed to initialize MySQL pool, falling back to mock database:', err);
+    console.warn('MySQL connection unavailable, falling back to mock database:', err);
     return null;
   }
 }
