@@ -107,9 +107,18 @@ export default function OrderCalendar({ token, onCreateNewOrder }: OrderCalendar
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ];
 
-  const getOrdersForDay = (day: number) => {
-    const dateStr = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return orders.filter((o) => o.estimated_delivery_date === dateStr);
+const getOrdersForDay = (day: number) => {
+    const year = currentDate.getFullYear();
+    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+    const calendarDateStr = `${year}-${month}-${dayStr}`;
+
+    return orders.filter((o) => {
+      if (!o.estimated_delivery_date) return false;
+      
+      const dbDateOnly = o.estimated_delivery_date.split('T')[0];
+      return dbDateOnly === calendarDateStr;
+    });
   };
 
   const getPriorityBadgeClass = (priority: string) => {
