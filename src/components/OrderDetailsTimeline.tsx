@@ -66,7 +66,7 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
   // Form states for Financial actions
   const [showAddPayment, setShowAddPayment] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta' | 'transferencia'>('efectivo');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
   const [paymentNotes, setPaymentNotes] = useState('');
   const [submittingPayment, setSubmittingPayment] = useState(false);
 
@@ -589,14 +589,16 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
                         <div>
                           <label className="text-[9px] text-slate-400 block font-bold uppercase mb-1">Método de Pago</label>
                           <select 
-                            value={paymentMethod} 
-                            onChange={(e: any) => setPaymentMethod(e.target.value)}
-                            className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-lg focus:bg-white focus:outline-indigo-500 text-slate-800"
+                          value={paymentMethod} 
+                          onChange={(e: any) => setPaymentMethod(e.target.value as 'cash' | 'card' | 'transfer')}
+                          disabled={submittingPayment}
+                          className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 px-2 py-1.5 rounded-lg focus:bg-white focus:outline-indigo-500 text-slate-800 disabled:opacity-50"
                           >
-                            <option value="efectivo">Efectivo</option>
-                            <option value="tarjeta">Tarjeta de Crédito</option>
-                            <option value="transferencia">Transferencia Bancaria</option>
-                          </select>
+                            <option value="cash">Efectivo</option>
+                            <option value="card">Tarjeta de Crédito</option>
+                            <option value="transfer">Transferencia Bancaria</option>
+                            </select>
+                            
                         </div>
                       </div>
 

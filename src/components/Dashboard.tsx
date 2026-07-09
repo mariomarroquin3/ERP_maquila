@@ -685,9 +685,9 @@ export default function Dashboard({ token, user, setActiveTab }: DashboardProps)
                   required
                 >
                   <option value="">-- Seleccione un Pedido --</option>
-                  {orders.filter((o) => o.status_id !== 6).map((o) => (
+                  {orders.filter((o) => o.status_id !== 6 && (parseFloat(o.total_price || '0') - parseFloat(o.total_paid || '0')) > 0.01).map((o) => (
                     <option key={o.id} value={o.id}>
-                      Pedido #{o.id} - {o.client_name} (${parseFloat(o.total_price).toFixed(2)})
+                      Pedido #{o.id} - {o.client_name} (Falta: ${(parseFloat(o.total_price || '0') - parseFloat(o.total_paid || '0')).toFixed(2)})
                     </option>
                   ))}
                 </select>
@@ -708,22 +708,26 @@ export default function Dashboard({ token, user, setActiveTab }: DashboardProps)
                   />
                 </div>
               </div>
-
+              
               <div className="space-y-1">
                 <label className="font-bold text-slate-700 block">Método de Pago *</label>
                 <div className="grid grid-cols-3 gap-2">
-                  {(['efectivo', 'tarjeta', 'transferencia'] as const).map((method) => (
+                  {[
+                    { id: 'cash', label: 'Efectivo' },
+                    { id: 'card', label: 'Tarjeta' },
+                    { id: 'transfer', label: 'Transferencia' }
+                  ].map((method) => (
                     <button
                       type="button"
-                      key={method}
-                      onClick={() => setPaymentMethod(method)}
-                      className={`py-2 px-3 text-xs font-bold rounded-xl border capitalize transition ${
-                        paymentMethod === method 
+                      key={method.id}
+                      onClick={() => setPaymentMethod(method.id as 'cash' | 'card' | 'transfer')}
+                      className={`py-2 px-3 text-xs font-bold rounded-xl border transition ${
+                        paymentMethod === method.id 
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' 
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {method}
+                      {method.label}
                     </button>
                   ))}
                 </div>
