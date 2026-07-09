@@ -522,16 +522,32 @@ BEFORE UPDATE ON `order_items`
 FOR EACH ROW
 BEGIN
     DECLARE v_extra DECIMAL(10,2);
+    DECLARE v_derived_qty INT;
+
+    SELECT COALESCE(SUM(`quantity`), 0)
+    INTO v_derived_qty
+    FROM `order_item_sizes`
+    WHERE `order_item_id` = NEW.`id`;
 
     IF NEW.`quantity` <> OLD.`quantity` THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'ERR_INVALID_QUANTITY_WRITE|quantity es derivado de order_item_sizes; no debe escribirse directamente';
+        IF NEW.`quantity` = v_derived_qty THEN
+            -- Permitir el recalculo legítimo que viene de order_item_sizes.
+            SET NEW.`quantity` = v_derived_qty;
+        ELSE
+            SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'ERR_INVALID_QUANTITY_WRITE|quantity es derivado de order_item_sizes; no debe escribirse directamente';
+        END IF;
     END IF;
 
     SELECT COALESCE(SUM(`price_modifier_snapshot`), 0) INTO v_extra
     FROM `order_item_attributes` WHERE `order_item_id` = NEW.`id`;
 
-    SET NEW.`subtotal` = (NEW.`unit_price` + v_extra) * NEW.`quantity`;
+    IF NEW.`quantity` = v_derived_qty THEN
+        -- Preservar el subtotal ya calculado por sp_recalc_order_item_subtotal.
+        SET NEW.`subtotal` = COALESCE(NEW.`subtotal`, OLD.`subtotal`);
+    ELSE
+        SET NEW.`subtotal` = (NEW.`unit_price` + v_extra) * NEW.`quantity`;
+    END IF;
 END$$
 
 CREATE TRIGGER `trg_order_items_after_insert`
@@ -761,8 +777,7 @@ BEGIN
     JOIN `orders` `o` ON `o`.`id` = `pt`.`order_id`
     WHERE `pt`.`stage_id` = NEW.`stage_id`
       AND `pt`.`start_date` = NEW.`start_date`
-      AND `o`.`status_id` <> 6
-    FOR UPDATE;
+      AND `o`.`status_id` <> 6;
 
     IF (v_committed + NEW.`workload_points`) > v_max THEN
         SIGNAL SQLSTATE '45001'
@@ -808,8 +823,7 @@ BEGIN
         WHERE `pt`.`stage_id` = NEW.`stage_id`
           AND `pt`.`start_date` = NEW.`start_date`
           AND `pt`.`id` <> NEW.`id`
-          AND `o`.`status_id` <> 6
-        FOR UPDATE;
+          AND `o`.`status_id` <> 6;
 
         IF (v_committed + NEW.`workload_points`) > v_max THEN
             SIGNAL SQLSTATE '45001'
