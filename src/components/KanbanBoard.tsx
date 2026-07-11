@@ -58,6 +58,20 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
     if (!advancingTask) return;
     setAdvanceSubmitting(true);
     try {
+      // 1. Forzamos la actualización de estado a Completado (estado 3) en la BD
+      await fetch(`/api/production/tasks/${advancingTask.id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          status_id: 3,
+          comment: advanceComment || 'Fase completada antes de avanzar'
+        })
+      });
+
+      // 2. Ejecutamos el avance a la siguiente etapa
       const res = await fetch(`/api/production/tasks/${advancingTask.id}/advance`, {
         method: 'POST',
         headers: {
@@ -68,6 +82,7 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
           comment: advanceComment || 'Fase completada y avanzada por supervisor'
         })
       });
+      
       const data = await res.json();
       if (data.success) {
         setAdvancingTask(null);
@@ -267,6 +282,10 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
   };
 
   const promptStatusChange = (task: ProductionTask, targetStatusId: number) => {
+    if (task.order_status_id === 1) {
+      alert('este pedido aun no ah sido confirmado');
+      return;
+    }
     setCommentingTask(task);
     setNewStatusId(targetStatusId);
     setStatusComment('');
@@ -275,6 +294,8 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
   const handleUpdateStatus = async () => {
     if (!commentingTask) return;
     const taskId = commentingTask.id;
+    // Guardamos el order_id antes de limpiar el estado
+    const orderIdToSync = commentingTask.order_id; 
     setStatusUpdating(taskId);
     setCommentingTask(null);
 
@@ -285,6 +306,7 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
       : 'Iniciado proceso en taller';
 
     try {
+      // 1. Actualizamos el estado de la tarea en el Kanban
       const res = await fetch(`/api/production/tasks/${taskId}/status`, {
         method: 'PUT',
         headers: {
@@ -297,7 +319,28 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
         })
       });
       const data = await res.json();
+      
       if (data.success) {
+        // --- NUEVA LÓGICA DE SINCRONIZACIÓN AUTOMÁTICA ---
+        if (newStatusId === 2 && orderIdToSync) {
+          try {
+            await fetch(`/api/orders/${orderIdToSync}/status`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                status_id: 3,
+                comment: 'Sincronización automática: El taller inició la producción en Kanban.'
+              })
+            });
+          } catch (syncErr) {
+            console.error('Error en sincronización automática del pedido:', syncErr);
+          }
+        }
+        // ---------------------------------------------------
+
         fetchTasks();
         if (user.role === 'admin' || user.role === 'taller') {
           fetchPendingReviewTasks();
@@ -347,6 +390,30 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
       default: return 'bg-slate-100 text-slate-700';
     }
   };
+  // FILTRO CORREGIDO: Mantiene la etapa activa actual (la primera no completada)
+  const activeTasksMap = new Map();
+  
+  // Ordenamos las tareas por etapa ascendente (1 a 10)
+  const sortedTasks = [...tasks].sort((a, b) => a.stage_id - b.stage_id);
+  
+  sortedTasks.forEach(task => {
+    const key = task.order_item_id || `${task.order_id}-${task.product_name}`;
+    const existing = activeTasksMap.get(key);
+    
+    if (!existing) {
+      activeTasksMap.set(key, task);
+    } else {
+      // Si la etapa existente ya fue completada (3) y la nueva NO, la nueva es la actual (ej: pasa de Corte a Estampado)
+      if (existing.status_id === 3 && task.status_id !== 3) {
+        activeTasksMap.set(key, task);
+      } 
+      // Si ambas están completadas, nos quedamos con la de mayor avance
+      else if (existing.status_id === 3 && task.status_id === 3) {
+        activeTasksMap.set(key, task);
+      }
+    }
+  });
+  const visibleTasks = Array.from(activeTasksMap.values());
 
   return (
     <div className="space-y-6">
@@ -556,7 +623,7 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
         ) : (
           <div className="flex overflow-x-auto gap-4 pb-6 w-full snap-x scrollbar-thin">
             {stages.map((stage) => {
-              const stageTasks = tasks.filter((t) => t.stage_id === stage.id);
+              const stageTasks = visibleTasks.filter((t) => t.stage_id === stage.id);
               return (
                 <div 
                   key={stage.id} 
@@ -622,7 +689,13 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
                                   {/* Advance to next stage button */}
                                   {task.stage_id < 10 && (
                                     <button
-                                      onClick={() => setAdvancingTask(task)}
+                                      onClick={() => {
+                                        if (task.order_status_id === 1) {
+                                          alert('este pedido aun no ah sido confirmado');
+                                          return;
+                                        }
+                                        setAdvancingTask(task);
+                                      }}
                                       className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold py-1.5 px-2 rounded-lg transition gap-0.5"
                                       title="Avanzar de Etapa (Completar esta y pasar a la siguiente)"
                                     >

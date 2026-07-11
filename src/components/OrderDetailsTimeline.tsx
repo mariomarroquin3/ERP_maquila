@@ -166,10 +166,17 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
   };
 
   // ----------------------------------------------------
-  // Financial Calculators
+  // Financial Calculators (Corregido para manejar strings y comas)
   // ----------------------------------------------------
-  const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount as any), 0);
-  const remainingBalance = Math.max(0, parseFloat(localOrder.total_price as any) - totalPaid);
+  const parseAmountSafe = (val: any) => {
+    if (!val) return 0;
+    const cleanStr = String(val).replace(/,/g, '');
+    return parseFloat(cleanStr) || 0;
+  };
+
+  const totalPaid = payments.reduce((sum, p) => sum + parseAmountSafe(p.amount), 0);
+  const orderTotal = parseAmountSafe(localOrder.total_price);
+  const remainingBalance = Math.max(0, orderTotal - totalPaid);
   const isFullyPaid = remainingBalance < 0.01;
 
   // ----------------------------------------------------
@@ -180,6 +187,11 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
   const productionProgressPercent = totalTasks > 0 
     ? Math.round((completedTasks / totalTasks) * 100) 
     : 0;
+
+  // NUEVO: Detectar si el taller ya metió mano (SOLO verificamos status, no el stage_id)
+  const hasStartedProduction = productionTasks.some(t => t.status_id > 1);
+
+
 
   // ----------------------------------------------------
   // Form Submission Handlers
@@ -316,8 +328,11 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
     
     // UI Validation to prevent invalid state transitions before API request
     if (targetStatusId === 3 && localOrder.status_id !== 2) {
-      setErrorMessage('Error de transición: El pedido debe estar en estado "Confirmado" antes de ser ingresado a producción activa.');
-      return;
+      // NUEVO: Excepción que permite el salto directo de 1 a 3 SOLO si el taller ya empezó a trabajar (desfase)
+      if (!(localOrder.status_id === 1 && hasStartedProduction)) {
+        setErrorMessage('Error de transición: El pedido debe estar en estado "Confirmado" antes de ser ingresado a producción activa.');
+        return;
+      }
     }
 
     if (targetStatusId === 4 && localOrder.status_id !== 3) {
@@ -835,7 +850,7 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
                       {localOrder.status_id === 1 && (
                         <div className="space-y-2">
                           <p className="text-[10px] text-slate-500 leading-normal">
-                            ⚠️ Este pedido se encuentra como <strong>Pendiente de Confirmación</strong>. No se permite iniciar la línea de producción hasta que se confirme oficialmente.
+                            Este pedido está <strong>Pendiente de Confirmación</strong>.
                           </p>
                           <button
                             onClick={() => handleTransitionOrderStatus(2, 'Pedido confirmado y autorizado para programar taller.')}
@@ -850,7 +865,7 @@ export default function OrderDetailsTimeline({ order, token, role, onRefreshNeed
                       {localOrder.status_id === 2 && (
                         <div className="space-y-2">
                           <p className="text-[10px] text-slate-500 leading-normal">
-                            El pedido ha sido <strong>Confirmado</strong>. El taller ya puede iniciar el corte físico de telas y confección.
+                            El pedido ha sido <strong>Confirmado</strong>.
                           </p>
                           <button
                             onClick={() => handleTransitionOrderStatus(3, 'Producción iniciada formalmente en línea de confección.')}
