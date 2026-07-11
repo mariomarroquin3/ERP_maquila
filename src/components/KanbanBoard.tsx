@@ -324,7 +324,7 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
         // --- NUEVA LÓGICA DE SINCRONIZACIÓN AUTOMÁTICA ---
         if (newStatusId === 2 && orderIdToSync) {
           try {
-            await fetch(`/api/orders/${orderIdToSync}/status`, {
+            const syncResponse = await fetch(`/api/orders/${orderIdToSync}/status`, {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
@@ -335,8 +335,21 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
                 comment: 'Sincronización automática: El taller inició la producción en Kanban.'
               })
             });
-          } catch (syncErr) {
+
+            const syncData = await syncResponse.json();
+
+            if (!syncResponse.ok) {
+              alert(syncData.message || 'No fue posible iniciar la producción del pedido.');
+              return;
+            }
+          } catch (syncErr: any) {
             console.error('Error en sincronización automática del pedido:', syncErr);
+
+            const message =
+              syncErr?.message ||
+              'No fue posible sincronizar el estado del pedido.';
+
+            alert(`❌ ${message}`);
           }
         }
         // ---------------------------------------------------
@@ -395,24 +408,33 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
   
   // Ordenamos las tareas por etapa ascendente (1 a 10)
   const sortedTasks = [...tasks].sort((a, b) => a.stage_id - b.stage_id);
-  
+
   sortedTasks.forEach(task => {
     const key = task.order_item_id || `${task.order_id}-${task.product_name}`;
     const existing = activeTasksMap.get(key);
-    
+
     if (!existing) {
       activeTasksMap.set(key, task);
-    } else {
-      // Si la etapa existente ya fue completada (3) y la nueva NO, la nueva es la actual (ej: pasa de Corte a Estampado)
-      if (existing.status_id === 3 && task.status_id !== 3) {
-        activeTasksMap.set(key, task);
-      } 
-      // Si ambas están completadas, nos quedamos con la de mayor avance
-      else if (existing.status_id === 3 && task.status_id === 3) {
-        activeTasksMap.set(key, task);
-      }
+      return;
     }
-  });
+
+    // Si la tarea actual ya está completada y encontramos una pendiente,
+    // esa pendiente pasa a ser la etapa activa.
+    if (existing.status_id === 3 && task.status_id !== 3) {
+      activeTasksMap.set(key, task);
+      return;
+    }
+
+    // Si la tarea actual NO está completada, nunca la reemplazamos.
+    if (existing.status_id !== 3) {
+      return;
+    }
+
+    // Solo si TODAS están completadas, nos quedamos con la de mayor etapa.
+    if (existing.status_id === 3 && task.status_id === 3 && task.stage_id > existing.stage_id) {
+      activeTasksMap.set(key, task);
+    }
+  }); 
   const visibleTasks = Array.from(activeTasksMap.values());
 
   return (

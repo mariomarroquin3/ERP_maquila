@@ -501,7 +501,7 @@ export async function getProductionTasks(dateStr?: string, orderId?: number): Pr
          JOIN orders o ON pt.order_id = o.id
          JOIN order_items oi ON pt.order_item_id = oi.id
          JOIN products p ON oi.product_id = p.id
-         WHERE (pt.start_date = ? OR pt.stage_id = 10)
+         WHERE pt.start_date = ?
          ORDER BY ps.sequence_order ASC, pt.id ASC`,
         [queryDate]
       );
@@ -531,7 +531,7 @@ export async function getProductionTasks(dateStr?: string, orderId?: number): Pr
     } else {
       const queryDate = dateStr || new Date().toISOString().split('T')[0];
       return mockDb.productionTasks
-        .filter((t) => t.start_date === queryDate || t.stage_id === 10)
+        .filter((t) => t.start_date === queryDate)
         .map((t) => {
           const stage = mockDb.productionStages.find((s) => s.id === t.stage_id);
           const status = mockDb.productionStatus.find((s) => s.id === t.status_id);
