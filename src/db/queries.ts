@@ -501,7 +501,7 @@ export async function getProductionTasks(dateStr?: string, orderId?: number): Pr
          JOIN orders o ON pt.order_id = o.id
          JOIN order_items oi ON pt.order_item_id = oi.id
          JOIN products p ON oi.product_id = p.id
-         WHERE pt.start_date = ?
+         WHERE (pt.start_date = ? OR pt.stage_id = 10)
          ORDER BY ps.sequence_order ASC, pt.id ASC`,
         [queryDate]
       );
@@ -531,7 +531,7 @@ export async function getProductionTasks(dateStr?: string, orderId?: number): Pr
     } else {
       const queryDate = dateStr || new Date().toISOString().split('T')[0];
       return mockDb.productionTasks
-        .filter((t) => t.start_date === queryDate)
+        .filter((t) => t.start_date === queryDate || t.stage_id === 10)
         .map((t) => {
           const stage = mockDb.productionStages.find((s) => s.id === t.stage_id);
           const status = mockDb.productionStatus.find((s) => s.id === t.status_id);
@@ -1493,8 +1493,25 @@ export async function updateOrderStatus(
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      await conn.query('UPDATE orders SET status_id = ?, updated_at = NOW() WHERE id = ?', [statusId, orderId]);
-      
+      await conn.query(
+        'UPDATE orders SET status_id = ?, updated_at = NOW() WHERE id = ?',
+        [statusId, orderId]
+      );
+
+      // Si el pedido fue entregado, mover todas las tareas a Despachado
+      if (statusId === 5) {
+        await conn.query(
+          `UPDATE production_tasks
+           SET
+             stage_id = 10,
+             status_id = 3,
+             end_date_actual = CURDATE(),
+             updated_at = NOW()
+           WHERE order_id = ?`,
+          [orderId]
+        );
+      }
+
       // Add order status history log
       await conn.query(
         'INSERT INTO order_status_history (order_id, status_id, changed_by, comment) VALUES (?, ?, ?, ?)',
@@ -1512,6 +1529,18 @@ export async function updateOrderStatus(
     const idx = mockDb.orders.findIndex((o) => o.id === orderId);
     if (idx !== -1) {
       mockDb.orders[idx].status_id = statusId;
+
+      if (statusId === 5) {
+        mockDb.productionTasks
+          .filter(t => t.order_id === orderId)
+          .forEach(t => {
+            t.stage_id = 10;
+            t.status_id = 3;
+            t.end_date_actual = new Date().toISOString().split('T')[0];
+            t.updated_at = new Date().toISOString();
+          });
+      }
+      
       mockDb.orders[idx].updated_at = new Date().toISOString();
     }
     mockDb.orderStatusHistory.push({
