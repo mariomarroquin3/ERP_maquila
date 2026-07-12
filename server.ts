@@ -554,10 +554,26 @@ app.post('/api/production/tasks/:id/advance', authenticateToken, requireRole(['a
     const taskId = parseInt(req.params.id, 10);
     const { comment } = req.body;
 
-    await advanceTaskStage(taskId, req.user.id, req.user.name || req.user.email, comment);
-    res.json({ success: true, message: 'Fase del pedido avanzada con éxito' });
-  } catch (err) {
-    next(err);
+    await advanceTaskStage(
+      taskId,
+      req.user.id,
+      req.user.name || req.user.email,
+      comment
+    );
+
+    res.json({
+      success: true,
+      message: 'Fase del pedido avanzada con éxito'
+    });
+
+  } catch (err: any) {
+    console.error('ERROR ADVANCE TASK:', err.message);
+
+    res.status(400).json({
+      success: false,
+      code: 'VALIDATION_ERROR',
+      message: err.message || 'No se pudo avanzar la etapa'
+    });
   }
 });
 

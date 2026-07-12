@@ -93,13 +93,19 @@ const handleAdvanceStage = async () => {
 
       const data = await res.json();
 
-      if (data.success) {
+      console.log('RESPUESTA ADVANCE:', data);
+
+      if (res.ok && data.success) {
         setAdvancingTask(null);
         setAdvanceComment('');
         fetchTasks();
         toast.success('Etapa avanzada correctamente');
       } else {
-        toast.error(`Error al avanzar etapa: ${data.message}`);
+        toast.error(
+          data.message ||
+          data.error ||
+          'No fue posible avanzar la etapa'
+        );
       }
 
     } catch (err) {
@@ -333,18 +339,24 @@ const handleAdvanceStage = async () => {
       const data = await res.json();
       
       if (data.success) {
-
-        // ---------------------------------------------------
-
         fetchTasks();
+
         if (user.role === 'admin' || user.role === 'taller') {
           fetchPendingReviewTasks();
         }
+
+        toast.success('Estado actualizado correctamente');
       } else {
-        alert(`Error al actualizar estado: ${data.message}`);
+        toast.error(
+          data.message || 'Error al actualizar estado'
+        );
       }
     } catch (err) {
       console.error('Error updating task:', err);
+
+      toast.error(
+        'Error de conexión al actualizar estado'
+      );
     } finally {
       setStatusUpdating(null);
     }
@@ -694,12 +706,14 @@ const handleAdvanceStage = async () => {
                                   {task.stage_id < 10 && (
                                     <button
                                     onClick={() => {
-                                        if (!canStartProduction(task)) {
-                                          return;
-                                        }
+                                      console.log('TASK COMPLETA:', task);
 
-                                        setAdvancingTask(task);
-                                      }}
+                                      if (!canStartProduction(task)) {
+                                        return;
+                                      }
+
+                                      setAdvancingTask(task);
+                                    }}
                                       className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold py-1.5 px-2 rounded-lg transition gap-0.5"
                                       title="Avanzar de Etapa (Completar esta y pasar a la siguiente)"
                                     >
