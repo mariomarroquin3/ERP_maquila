@@ -448,6 +448,7 @@ export async function createOrder(payload: OrderCreationPayload): Promise<number
           stage_id: stageId,
           assigned_to: null,
           status_id: 1, // pendiente
+          work_status: 1,
           start_date: taskStartDate,
           workload_points: totalUnits,
           created_at: new Date().toISOString(),
@@ -645,14 +646,53 @@ export async function updateTaskStatus(
         }
         const task = tasks[0];
 
-        // If stage completes (e.g. statusId = 3 completado), we might set actual end date
-        const endDateActual = statusId === 3 ? new Date().toISOString().split('T')[0] : null;
+        // =====================================================
+        // CANDADO: Solo permite trabajar si el pedido está
+        // en Producción Activa
+        // =====================================================
+        if (statusId === 2 || statusId === 3) {
+          const [orders]: any = await conn.query(
+            'SELECT status_id FROM orders WHERE id = ?',
+            [task.order_id]
+          );
 
-        await conn.query(
+          if (orders.length === 0) {
+            throw new Error('Pedido no encontrado');
+          }
+
+          if (orders[0].status_id !== 3) {
+            throw new Error(
+              'El pedido debe estar en Producción Activa antes de iniciar el trabajo'
+            );
+          }
+        }
+
+      // If stage completes (e.g. statusId = 3 completado), we might set actual end date
+      const endDateActual =
+        statusId === 3 && task.work_status !== 3
+          ? new Date().toISOString().split('T')[0]
+          : task.end_date_actual;
+          
+          await conn.query(
           `UPDATE production_tasks 
-           SET status_id = ?, end_date_actual = ?, assigned_to = COALESCE(assigned_to, ?)
+           SET 
+             status_id = ?, 
+             end_date_actual = ?,
+             work_status = CASE 
+               WHEN ? = 3 THEN 4
+               WHEN ? = 2 THEN 2
+               ELSE work_status
+             END,
+             assigned_to = COALESCE(assigned_to, ?)
            WHERE id = ?`,
-          [statusId, endDateActual, userId, taskId]
+          [
+            statusId,
+            endDateActual,
+            statusId,
+            statusId,
+            userId,
+            taskId
+          ]
         );
 
         // Insert task history log
@@ -661,18 +701,26 @@ export async function updateTaskStatus(
            VALUES (?, ?, ?, ?)`,
           [taskId, statusId, userId, comment || 'Actualización de estado en el taller']
         );
-
-        // If this is the final stage (despachado, stage_id = 10) and is completed, maybe mark order status
+        
         if (task.stage_id === 10 && statusId === 3) {
-          // Check if all tasks for this order are completed
           const [allTasks]: any = await conn.query(
-            'SELECT status_id FROM production_tasks WHERE order_id = ?',
+            `
+            SELECT status_id, work_status
+            FROM production_tasks
+            WHERE order_id = ?
+            `,
             [task.order_id]
           );
-          const allDone = allTasks.every((t: any) => t.status_id === 3);
+
+          const allDone = allTasks.every(
+            (t: any) =>
+              t.status_id === 3 &&
+              t.work_status === 4
+          );
+
           if (allDone) {
             await conn.query(
-              'UPDATE orders SET status_id = 4 WHERE id = ?', // listo_entrega (4)
+              'UPDATE orders SET status_id = 4 WHERE id = ?',
               [task.order_id]
             );
           }
@@ -695,8 +743,14 @@ export async function updateTaskStatus(
       const task = mockDb.productionTasks[taskIndex];
 
       task.status_id = statusId;
+
       if (statusId === 3) {
         task.end_date_actual = new Date().toISOString().split('T')[0];
+        task.work_status = 4;
+      }
+
+      if (statusId === 2) {
+        task.work_status = 2;
       }
       if (!task.assigned_to) {
         task.assigned_to = userId;
@@ -715,8 +769,15 @@ export async function updateTaskStatus(
 
       // If final stage (despachado id=10) is completado (id=3), check if order needs update
       if (task.stage_id === 10 && statusId === 3) {
-        const orderTasks = mockDb.productionTasks.filter((t) => t.order_id === task.order_id);
-        const allDone = orderTasks.every((t) => t.status_id === 3);
+        const orderTasks = mockDb.productionTasks.filter(
+          (t) => t.order_id === task.order_id
+        );
+
+        const allDone = orderTasks.every(
+          (t) =>
+            t.status_id === 3 &&
+            t.work_status === 4
+        );
         if (allDone) {
           const ord = mockDb.orders.find((o) => o.id === task.order_id);
           if (ord) {
@@ -1690,11 +1751,44 @@ export async function advanceTaskStage(
     // Fetch the current task first
     let task: any;
     if (pool) {
-      const [tasks]: any = await pool.query('SELECT * FROM production_tasks WHERE id = ?', [taskId]);
+      const [tasks]: any = await pool.query(
+        'SELECT * FROM production_tasks WHERE id = ?',
+        [taskId]
+      );
+
       if (tasks.length === 0) throw new Error('Task not found');
+
       task = tasks[0];
+
+      // Validar confirmación antes de iniciar producción desde Corte
+      if (task.stage_id === 1) {
+        const [orders]: any = await pool.query(
+          'SELECT status_id FROM orders WHERE id = ?',
+          [task.order_id]
+        );
+
+        if (orders.length === 0) {
+          throw new Error('Pedido no encontrado');
+        }
+
+        console.log('VALIDACION AVANCE:', {
+          taskId: task.id,
+          orderId: task.order_id,
+          stageId: task.stage_id,
+          orderStatus: orders[0].status_id
+        });
+
+        if (orders[0].status_id !== 3) {
+          throw new Error(
+            'El pedido debe estar ingresado a producción activa antes de iniciar el trabajo'
+          );
+        }
+      }
+
+      
     } else {
       task = mockDb.productionTasks.find((t) => t.id === taskId);
+
       if (!task) throw new Error('Task not found');
     }
 
@@ -1705,18 +1799,28 @@ export async function advanceTaskStage(
     let allTasks: any[] = [];
     if (pool) {
       const [rows]: any = await pool.query(
-        'SELECT * FROM production_tasks WHERE order_id = ? ORDER BY stage_id ASC',
+        `
+        SELECT *
+        FROM production_tasks
+        WHERE order_id = ?
+        ORDER BY stage_id ASC, id ASC
+        `,
         [orderId]
       );
+
       allTasks = rows;
+      
     } else {
       allTasks = mockDb.productionTasks
         .filter((t) => t.order_id === orderId)
         .sort((a, b) => a.stage_id - b.stage_id);
     }
 
-    const currentIndex = allTasks.findIndex((t) => t.id === taskId);
-    const nextTask = allTasks[currentIndex + 1];
+    const nextTask = allTasks.find(
+      (t) =>
+        t.stage_id > currentStageId &&
+        t.status_id === 1
+    );
 
     // We will complete the current task
     const todayStr = new Date().toISOString().split('T')[0];
@@ -1728,9 +1832,16 @@ export async function advanceTaskStage(
 
         // Complete current task
         await conn.query(
-          `UPDATE production_tasks 
-           SET status_id = 3, end_date_actual = ?, updated_at = NOW()
-           WHERE id = ?`,
+          `
+          UPDATE production_tasks 
+          SET 
+            status_id = 3,
+            work_status = 4,
+            end_date_actual = ?,
+            completed_at = NOW(),
+            updated_at = NOW()
+          WHERE id = ?
+          `,
           [todayStr, taskId]
         );
 
@@ -1741,19 +1852,47 @@ export async function advanceTaskStage(
           [taskId, userId, comment || 'Fase completada y avanzada por supervisor']
         );
 
+        // Cambiar pedido a En Producción cuando inicia el flujo de taller
+        await conn.query(
+          `
+          UPDATE orders
+          SET status_id = 3,
+              updated_at = NOW()
+          WHERE id = ?
+            AND status_id = 2
+          `,
+          [orderId]
+        );
+        
         if (nextTask) {
-          // Update next task to start today so it appears in Kanban visually!
           await conn.query(
-            `UPDATE production_tasks 
-             SET start_date = ?, updated_at = NOW()
-             WHERE id = ?`,
-            [todayStr, nextTask.id]
+            `
+            UPDATE production_tasks
+            SET 
+              status_id = 1,
+              work_status = 1,
+              updated_at = NOW()
+            WHERE id = ?
+            `,
+            [nextTask.id]
           );
 
           await conn.query(
-            `INSERT INTO production_task_history (production_task_id, status_id, changed_by, comment)
-             VALUES (?, ?, ?, ?)`,
-            [nextTask.id, nextTask.status_id, userId, 'Fecha de inicio adelantada para visualización activa en taller']
+            `
+            INSERT INTO production_task_history
+            (
+              production_task_id,
+              status_id,
+              changed_by,
+              comment
+            )
+            VALUES (?, 1, ?, ?)
+            `,
+            [
+              nextTask.id,
+              userId,
+              'Siguiente etapa preparada para iniciar según programación'
+            ]
           );
         } else {
           // If no next task, it was the last task. Mark the order as Listo para entrega (status_id = 4)
@@ -1773,7 +1912,9 @@ export async function advanceTaskStage(
     } else {
       // Sandbox
       task.status_id = 3;
+      task.work_status = 4;
       task.end_date_actual = todayStr;
+      task.completed_at = new Date().toISOString();
       task.updated_at = new Date().toISOString();
 
       mockDb.productionTaskHistory.push({
@@ -1782,21 +1923,23 @@ export async function advanceTaskStage(
         status_id: 3,
         changed_by: userId,
         changed_at: new Date().toISOString(),
-        comment: comment || 'Fase completada y avanzada por supervisor',
+        comment: comment || 'Fase completada por supervisor',
       });
 
       if (nextTask) {
         const nextT = mockDb.productionTasks.find((t) => t.id === nextTask.id);
         if (nextT) {
-          nextT.start_date = todayStr;
+          nextT.status_id = 1;
+          nextT.work_status = 1;
           nextT.updated_at = new Date().toISOString();
+
           mockDb.productionTaskHistory.push({
             id: mockDb.productionTaskHistory.length + 1,
             production_task_id: nextT.id,
             status_id: nextT.status_id,
             changed_by: userId,
             changed_at: new Date().toISOString(),
-            comment: 'Fecha de inicio adelantada para visualización activa en taller',
+            comment: 'Siguiente etapa preparada para iniciar según programación',
           });
         }
       } else {

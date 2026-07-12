@@ -176,6 +176,7 @@ export interface ProductionTask {
   stage_id: number;
   assigned_to: number | null;
   status_id: number;
+  work_status: number;
   start_date: string;
   end_date_estimated?: string;
   end_date_actual?: string;
@@ -638,6 +639,7 @@ class MockDatabase {
           workload_points: 30, // 30 units total quantity
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+          work_status: isCurrent ? 2 : 1, // en_proceso (2) or pendiente (1)
         });
       }
     });

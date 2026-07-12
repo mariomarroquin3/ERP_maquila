@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ProductionTask, Order, User } from '../types';
+import { toast } from 'sonner';
 
 interface KanbanBoardProps {
   token: string;
@@ -53,25 +54,30 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
   const [reworkDescription, setReworkDescription] = useState('');
   const [targetStageId, setTargetStageId] = useState<number>(1); // default Corte (1)
   const [reworkSubmitting, setReworkSubmitting] = useState(false);
-
-  const handleAdvanceStage = async () => {
-    if (!advancingTask) return;
-    setAdvanceSubmitting(true);
-    try {
-      // 1. Forzamos la actualización de estado a Completado (estado 3) en la BD
-      await fetch(`/api/production/tasks/${advancingTask.id}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          status_id: 3,
-          comment: advanceComment || 'Fase completada antes de avanzar'
-        })
+  
+  const canStartProduction = (task: ProductionTask) => {
+    if (task.order_status_id === 1) {
+      toast.error('Pedido no confirmado', {
+        description: 'No puedes iniciar producción hasta que el pedido sea confirmado.',
       });
 
-      // 2. Ejecutamos el avance a la siguiente etapa
+      return false;
+    }
+
+    return true;
+  };
+
+const handleAdvanceStage = async () => {
+    if (!advancingTask) return;
+
+    if (!canStartProduction(advancingTask)) {
+      setAdvancingTask(null);
+      return;
+    }
+
+    setAdvanceSubmitting(true);
+
+    try {
       const res = await fetch(`/api/production/tasks/${advancingTask.id}/advance`, {
         method: 'POST',
         headers: {
@@ -79,20 +85,26 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          comment: advanceComment || 'Fase completada y avanzada por supervisor'
+          comment:
+            advanceComment ||
+            'Fase completada y avanzada por supervisor'
         })
       });
-      
+
       const data = await res.json();
+
       if (data.success) {
         setAdvancingTask(null);
         setAdvanceComment('');
         fetchTasks();
+        toast.success('Etapa avanzada correctamente');
       } else {
-        alert(`Error al avanzar etapa: ${data.message}`);
+        toast.error(`Error al avanzar etapa: ${data.message}`);
       }
+
     } catch (err) {
       console.error('Error advancing stage:', err);
+      toast.error('Error de red al intentar avanzar la etapa.');
     } finally {
       setAdvanceSubmitting(false);
     }
@@ -280,12 +292,12 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
     setDetailedOrderSpec(null);
     setReworkHistory([]);
   };
-
+  
   const promptStatusChange = (task: ProductionTask, targetStatusId: number) => {
-    if (task.order_status_id === 1) {
-      alert('este pedido aun no ah sido confirmado');
+    if (!canStartProduction(task)) {
       return;
     }
+
     setCommentingTask(task);
     setNewStatusId(targetStatusId);
     setStatusComment('');
@@ -321,37 +333,7 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
       const data = await res.json();
       
       if (data.success) {
-        // --- NUEVA LÓGICA DE SINCRONIZACIÓN AUTOMÁTICA ---
-        if (newStatusId === 2 && orderIdToSync) {
-          try {
-            const syncResponse = await fetch(`/api/orders/${orderIdToSync}/status`, {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                status_id: 3,
-                comment: 'Sincronización automática: El taller inició la producción en Kanban.'
-              })
-            });
 
-            const syncData = await syncResponse.json();
-
-            if (!syncResponse.ok) {
-              alert(syncData.message || 'No fue posible iniciar la producción del pedido.');
-              return;
-            }
-          } catch (syncErr: any) {
-            console.error('Error en sincronización automática del pedido:', syncErr);
-
-            const message =
-              syncErr?.message ||
-              'No fue posible sincronizar el estado del pedido.';
-
-            alert(`❌ ${message}`);
-          }
-        }
         // ---------------------------------------------------
 
         fetchTasks();
@@ -711,11 +693,11 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
                                   {/* Advance to next stage button */}
                                   {task.stage_id < 10 && (
                                     <button
-                                      onClick={() => {
-                                        if (task.order_status_id === 1) {
-                                          alert('este pedido aun no ah sido confirmado');
+                                    onClick={() => {
+                                        if (!canStartProduction(task)) {
                                           return;
                                         }
+
                                         setAdvancingTask(task);
                                       }}
                                       className="inline-flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold py-1.5 px-2 rounded-lg transition gap-0.5"
