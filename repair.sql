@@ -279,3 +279,69 @@ SET @sql_index_status = IF(
 PREPARE stmt FROM @sql_index_status;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+-- =========================================================================
+-- F. LIMPIEZA DE DUPLICADOS EN HISTORIAL DE PRODUCCIÓN
+-- =========================================================================
+
+-- Índice para evitar repetir la misma etapa del mismo pedido
+SET @exist_unique_stage = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.STATISTICS
+    WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'production_tasks'
+    AND INDEX_NAME = 'idx_unique_order_stage'
+);
+
+
+SET @sql_unique_stage = IF(
+    @exist_unique_stage = 0,
+    '
+    CREATE UNIQUE INDEX idx_unique_order_stage
+    ON production_tasks(order_id, stage_id, id)
+    ',
+    'SELECT "idx_unique_order_stage ya existe"'
+);
+
+
+PREPARE stmt FROM @sql_unique_stage;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+
+-- =========================================================================
+-- G. VISTA LIMPIA PARA HISTORIAL DE PRODUCCIÓN
+-- =========================================================================
+
+DROP VIEW IF EXISTS production_order_history;
+
+
+CREATE VIEW production_order_history AS
+
+SELECT
+    pt.id,
+    pt.order_id,
+    pt.stage_id,
+    pt.status_id,
+    pt.start_date,
+    pt.planned_date,
+    pt.completed_at
+
+FROM production_tasks pt
+
+INNER JOIN (
+
+    SELECT
+        order_id,
+        stage_id,
+        MAX(id) AS latest_id
+
+    FROM production_tasks
+
+    GROUP BY
+        order_id,
+        stage_id
+
+) latest
+
+ON latest.latest_id = pt.id;

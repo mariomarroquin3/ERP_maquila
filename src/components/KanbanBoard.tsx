@@ -31,6 +31,10 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState<number | null>(null);
+  // Historial de producción por pedido
+  const [productionHistory, setProductionHistory] = useState<any[]>([]);
+
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null);
   
   // Specs viewer modal state
   const [selectedTaskSpec, setSelectedTaskSpec] = useState<ProductionTask | null>(null);
@@ -66,6 +70,17 @@ export default function KanbanBoard({ token, user }: KanbanBoardProps) {
 
     return true;
   };
+
+const getStatusDescription = (statusId:number) => {
+  const descriptions: Record<number,string> = {
+    1: 'Programado para producción',
+    2: 'Trabajo iniciado',
+    3: 'Etapa completada',
+    5: 'Esperando revisión'
+  };
+
+  return descriptions[statusId] || 'Cambio registrado';
+};
 
 const handleAdvanceStage = async () => {
     if (!advancingTask) return;
@@ -266,6 +281,38 @@ const handleAdvanceStage = async () => {
     }
   };
 
+  const fetchProductionHistory = async (orderId: number) => {
+    console.log('ENTRO HISTORY:', orderId);
+
+    try {
+      const res = await fetch(
+        `/api/production/orders/${orderId}/history`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      console.log('STATUS HISTORY:', res.status);
+
+      const data = await res.json();
+
+      console.log('RESPUESTA HISTORY:', data);
+
+      if (data.success) {
+        console.log("HISTORIAL COMPLETO:", data.history);
+        setProductionHistory(data.history);
+      } else {
+        toast.error(data.message || 'No se pudo cargar el historial');
+      }
+
+    } catch (err) {
+      console.error('Error cargando historial:', err);
+      toast.error('Error al cargar historial de producción');
+    }
+  };
+
   const openSpecViewer = async (task: ProductionTask) => {
     setSelectedTaskSpec(task);
     setLoadingSpec(true);
@@ -385,6 +432,44 @@ const handleAdvanceStage = async () => {
       case 5: return 'Listo para Revisión';
       default: return 'Pendiente';
     }
+  };
+
+  const getStageName = (stageId: number) => {
+    const stages: Record<number, string> = {
+      1: 'Corte',
+      2: 'Estampado',
+      3: 'Confección',
+      4: 'Acabado',
+      5: 'Control de Calidad',
+      6: 'Empaque',
+      7: 'Despacho',
+      8: 'Revisión Final',
+      9: 'Preparación Envío',
+      10: 'Entregado'
+    };
+
+    return stages[stageId] || `Etapa ${stageId}`;
+  };
+
+  const formatHistoryDate = (date: string | null) => {
+    if (!date) return 'Sin fecha';
+
+    return new Date(date).toLocaleDateString('es-ES', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  };
+
+  const getProductionStatus = (statusId: number) => {
+    const statuses: Record<number, string> = {
+      1: 'Pendiente',
+      2: 'En proceso',
+      3: 'Completado',
+      5: 'Listo para revisión'
+    };
+
+    return statuses[statusId] || 'Desconocido';
   };
 
   const getStatusBadgeColor = (statusId: number) => {
@@ -612,6 +697,7 @@ const handleAdvanceStage = async () => {
                           >
                             <Eye className="h-3.5 w-3.5" />
                           </button>
+
                           <button
                             onClick={() => handleApproveSingle(task.id)}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg shadow-2xs transition inline-flex items-center gap-1"
@@ -673,7 +759,16 @@ const handleAdvanceStage = async () => {
                           {/* Task Body */}
                           <div className="space-y-3.5">
                             <div className="flex justify-between items-start gap-1">
-                              <span className="text-[10px] font-extrabold text-slate-400 font-mono">TASK #{task.id}</span>
+                              <div className="flex flex-col">
+                                <span className="text-[10px] font-extrabold text-slate-400 font-mono">
+                                  TASK #{task.id}
+                                </span>
+
+                                <span className="text-[10px] font-bold text-indigo-500 font-mono">
+                                  PEDIDO #{task.order_id}
+                                </span>
+                              </div>
+
                               <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full ${getStatusBadgeColor(task.status_id)}`}>
                                 {getStatusLabel(task.status_id)}
                               </span>
@@ -698,6 +793,40 @@ const handleAdvanceStage = async () => {
                               >
                                 <Eye className="h-3.5 w-3.5" />
                                 Ver Ficha
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  const isOpen = expandedHistory === task.order_id;
+
+                                  console.log("HIST CLICK", {
+                                    expandedHistory,
+                                    taskOrder: task.order_id,
+                                    isOpen
+                                  });
+
+                                  if (isOpen) {
+                                    console.log("CERRANDO HISTORIAL");
+
+                                    setExpandedHistory(null);
+                                    setProductionHistory([]);
+
+                                    return;
+                                  }
+
+                                  console.log("ABRIENDO HISTORIAL");
+
+                                  setExpandedHistory(task.order_id);
+                                  fetchProductionHistory(task.order_id);
+                                }}
+                                className="inline-flex items-center justify-center bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 text-[10px] font-semibold py-1.5 px-2 rounded-lg transition"
+                                title="Ver historial de producción"
+                              >
+                                {expandedHistory === task.order_id ? (
+                                  <X className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Clock className="h-3.5 w-3.5" />
+                                )}
                               </button>
 
                               {(user.role === 'admin' || user.role === 'taller') && (
@@ -789,8 +918,58 @@ const handleAdvanceStage = async () => {
                                 </button>
                               )}
                             </div>
-                          </div>
+
+                            {/* Production History Dropdown */}
+                          {expandedHistory === task.order_id && (
+                            <div className="mt-3 border-t border-indigo-100 pt-3 bg-indigo-50/40 rounded-lg p-3">
+                              <h5 className="text-[10px] font-extrabold text-indigo-700 uppercase mb-2">
+                                Historial del Pedido #{task.order_id}
+                              </h5>
+
+                              <div className="space-y-2">
+                                {productionHistory.length === 0 ? (
+                                  <p className="text-[10px] text-slate-500">
+                                    No hay historial disponible.
+                                  </p>
+                                ) : (
+                                  productionHistory.map((item, index) => (
+                                    <div
+                                      key={index}
+                                      className="bg-white border border-slate-100 rounded-md p-2"
+                                    >
+                                      <div>
+                                        <div className="flex justify-between items-start">
+                                          <span className="text-[10px] font-bold text-slate-700">
+                                            {getStageName(item.stage_id)}
+                                          </span>
+
+                                          <span className="text-[10px] text-slate-400">
+                                            {formatHistoryDate(item.planned_date || item.start_date)}
+                                          </span>
+                                        </div>
+
+                                        <div className="mt-1">
+                                          <span
+                                            className={`text-[10px] font-bold ${
+                                              item.status_id === 3
+                                                ? 'text-emerald-600'
+                                                : item.status_id === 2
+                                                ? 'text-blue-600'
+                                                : 'text-slate-500'
+                                            }`}
+                                          >
+                                            {getProductionStatus(item.status_id)}
+                                          </span>
+                                        </div>
+                                      </div>  
+                                    </div>    
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </div>
+                      </div>
                       ))
                     )}
                   </div>

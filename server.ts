@@ -41,6 +41,7 @@ import {
   getInvoices,
   createInvoice,
   updateOrderStatus,
+  getProductionHistory,
   getReportStats,
   advanceTaskStage,
   getReworkEvents,
@@ -576,6 +577,33 @@ app.post('/api/production/tasks/:id/advance', authenticateToken, requireRole(['a
     });
   }
 });
+
+
+// Historial de producción por pedido
+app.get(
+  '/api/production/orders/:id/history',
+  authenticateToken,
+  async (req: any, res: any, next: any) => {
+    try {
+      const orderId = parseInt(req.params.id, 10);
+
+      const history = await getProductionHistory(orderId);
+
+      res.json({
+        success: true,
+        history
+      });
+
+    } catch (err: any) {
+      console.error('ERROR PRODUCTION HISTORY:', err.message);
+
+      res.status(400).json({
+        success: false,
+        message: err.message || 'No se pudo obtener el historial'
+      });
+    }
+  }
+);
 
 app.post('/api/production/tasks/:id/rework', authenticateToken, requireRole(['admin', 'taller']), async (req: any, res: any, next: any) => {
   try {

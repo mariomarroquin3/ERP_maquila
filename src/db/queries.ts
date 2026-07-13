@@ -2366,6 +2366,47 @@ export async function updateUserStatus(id: number, isActive: boolean): Promise<v
     }
   }
 }
+// Obtener historial de producción de un pedido
+export async function getProductionHistory(orderId: number) {
+  return runWithRetry(async () => {
+
+    const pool = await getDbPool();
+
+    if (!pool) {
+      return [];
+    }
+
+    const [rows]: any = await pool.query(
+      `
+      SELECT 
+          pt.id,
+          pt.stage_id,
+          pt.status_id,
+          pt.start_date,
+          pt.planned_date,
+          pt.end_date_actual,
+          pt.completed_at
+
+      FROM production_tasks pt
+
+      WHERE pt.id IN (
+          SELECT MAX(id)
+          FROM production_tasks
+          WHERE order_id = ?
+          GROUP BY stage_id
+      )
+
+      AND pt.order_id = ?
+
+      ORDER BY pt.stage_id ASC
+      `,
+      [orderId, orderId]
+    );
+
+    return rows;
+
+  });
+}
 
 
 
